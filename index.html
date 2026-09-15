@@ -3,15 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Поймай картинку</title>
+<title>Сашкины члены</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
     margin: 0;
     height: 100%;
-    background: #1e1e2e;
+    background: #e8e8ec;
     font-family: Arial, sans-serif;
-    color: #fff;
+    color: #222;
     overflow: hidden;
     user-select: none;
   }
@@ -24,37 +24,26 @@
     gap: 10px;
     padding: 10px;
   }
-  #hud { font-size: 18px; }
+  #hud { font-size: 18px; color: #333; }
   #hud span { font-weight: bold; }
   canvas {
-    background: #2a2a3e;
+    background: #f5f5f8;
     border-radius: 12px;
-    box-shadow: 0 0 30px rgba(0,0,0,0.5);
+    box-shadow: 0 0 25px rgba(0,0,0,0.15);
     touch-action: none;
     max-width: 100%;
     max-height: 70vh;
   }
-  #controls {
-    display: flex;
-    gap: 20px;
-  }
+  #controls { display: flex; gap: 20px; }
   .btn {
-    width: 90px;
-    height: 70px;
-    border-radius: 16px;
-    border: none;
-    background: #4ade80;
-    color: #1e1e2e;
-    font-size: 36px;
-    font-weight: bold;
-    cursor: pointer;
+    width: 90px; height: 70px;
+    border-radius: 16px; border: none;
+    background: #4ade80; color: #1e1e2e;
+    font-size: 36px; font-weight: bold; cursor: pointer;
     box-shadow: 0 4px 0 #22a55a;
     transition: transform 0.05s, box-shadow 0.05s;
   }
-  .btn:active {
-    transform: translateY(4px);
-    box-shadow: 0 0 0 #22a55a;
-  }
+  .btn:active { transform: translateY(4px); box-shadow: 0 0 0 #22a55a; }
 </style>
 </head>
 <body>
@@ -71,19 +60,23 @@
 
 <script>
 // ============================================================
-//  ЗДЕСЬ МЕНЯЕШЬ КАРТИНКИ (имена файлов рядом с game.html)
+//  КАРТИНКИ
 // ============================================================
-const PLAYER_IMG_SRC = 'player.png'; // лицо платформы (150x150)
-const GOOD_IMG_SRC   = 'good.png';   // ловим -> +1 очко (80x80)
-const BAD_IMG_SRC    = 'bad.png';    // ловим -> -1 жизнь (80x80)
+const PLAYER_IMG_SRC = 'player.png'; // 150x150
+const GOOD_IMG_SRC   = 'good.png';   // 80x80
+const BAD_IMG_SRC    = 'bad.png';    // 80x80
 // ============================================================
+
+// ---- НАСТРОЙКИ ----
+const BAD_CHANCE  = 0.15;   // 15% плохих
+const START_LIVES = 3;
+// --------------------
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const W = canvas.width;
 const H = canvas.height;
 
-// Загрузка картинок
 function loadImg(src) {
   const img = new Image();
   img.src = src;
@@ -94,7 +87,6 @@ const playerImg = loadImg(PLAYER_IMG_SRC);
 const goodImg   = loadImg(GOOD_IMG_SRC);
 const badImg    = loadImg(BAD_IMG_SRC);
 
-// Игрок — ровно 150x150, как картинка
 const PLAYER_SIZE = 150;
 const player = {
   w: PLAYER_SIZE,
@@ -104,26 +96,27 @@ const player = {
   speed: 8
 };
 
-// Размер падающих — ровно 80x80, как картинки
 const ITEM_SIZE = 80;
 
 let items = [];
 let score = 0;
-let lives = 3;
-let gameOver = false;
+let lives = START_LIVES;
 
-// Управление
+// Состояния: 'splash' | 'start' | 'playing' | 'over'
+let state = 'splash';
+
 const keys = {};
 let moveLeft = false;
 let moveRight = false;
 
 document.addEventListener('keydown', e => {
   keys[e.key] = true;
-  if (gameOver && e.key === ' ') restart();
+  if (state === 'splash' && (e.key === ' ' || e.key === 'Enter')) state = 'start';
+  if (state === 'start' && (e.key === ' ' || e.key === 'Enter')) startGame();
+  if (state === 'over'  && (e.key === ' ' || e.key === 'Enter')) restart();
 });
 document.addEventListener('keyup', e => keys[e.key] = false);
 
-// Экранные кнопки — работают и мышью, и пальцем
 function bindHold(el, setter) {
   const on  = e => { e.preventDefault(); setter(true);  };
   const off = e => { e.preventDefault(); setter(false); };
@@ -137,13 +130,23 @@ function bindHold(el, setter) {
 bindHold(document.getElementById('btnLeft'),  v => moveLeft = v);
 bindHold(document.getElementById('btnRight'), v => moveRight = v);
 
-// Спавн
+canvas.addEventListener('touchstart', e => {
+  if (state === 'splash') { e.preventDefault(); state = 'start'; }
+  else if (state === 'start') { e.preventDefault(); startGame(); }
+  else if (state === 'over') { e.preventDefault(); restart(); }
+}, { passive: false });
+canvas.addEventListener('click', () => {
+  if (state === 'splash') state = 'start';
+  else if (state === 'start') startGame();
+  else if (state === 'over') restart();
+});
+
 let spawnTimer = 0;
 let spawnInterval = 55;
 
+// ---- СПАВН ----
 function spawnItem() {
-  // 25% — плохая картинка, 75% — хорошая
-  const isBad = Math.random() < 0.25;
+  const isBad = Math.random() < BAD_CHANCE;
   items.push({
     x: Math.random() * (W - ITEM_SIZE),
     y: -ITEM_SIZE,
@@ -151,46 +154,47 @@ function spawnItem() {
     speed: 2 + Math.random() * 2 + score * 0.03,
     isBad: isBad,
     img: isBad ? badImg : goodImg,
-    rot: (Math.random() - 0.5) * 0.6 // лёгкий наклон
+    rot: (Math.random() - 0.5) * 0.6
   });
 }
 
+// ---- ОБНОВЛЕНИЕ ----
 function update() {
-  if (gameOver) return;
+  // Заставка — ждёт касания
+  if (state === 'splash') return;
 
-  // Движение игрока
+  if (state !== 'playing') return;
+
   const left  = keys['ArrowLeft']  || keys['a'] || keys['A'] || moveLeft;
   const right = keys['ArrowRight'] || keys['d'] || keys['D'] || moveRight;
   if (left)  player.x -= player.speed;
   if (right) player.x += player.speed;
   player.x = Math.max(0, Math.min(W - player.w, player.x));
 
-  // Спавн
   spawnTimer++;
   if (spawnTimer >= spawnInterval) {
     spawnTimer = 0;
     spawnItem();
-    // постепенно ускоряем спавн
     spawnInterval = Math.max(25, 55 - Math.floor(score / 3));
   }
 
-  // Движение предметов
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i];
     it.y += it.speed;
 
-    // Столкновение с игроком
-    if (
+    const caught =
       it.y + it.size >= player.y &&
       it.y <= player.y + player.h &&
       it.x + it.size >= player.x &&
-      it.x <= player.x + player.w
-    ) {
+      it.x <= player.x + player.w;
+
+    if (caught) {
       items.splice(i, 1);
-      if (it.isBad) {
+
+      if (it.isBad === true) {
         lives--;
         document.getElementById('lives').textContent = lives;
-        if (lives <= 0) gameOver = true;
+        if (lives <= 0) state = 'over';
       } else {
         score++;
         document.getElementById('score').textContent = score;
@@ -198,24 +202,76 @@ function update() {
       continue;
     }
 
-    // Промах
     if (it.y > H) {
       items.splice(i, 1);
-      if (!it.isBad) {
-        // пропустил хорошую — минус жизнь
-        lives--;
-        document.getElementById('lives').textContent = lives;
-        if (lives <= 0) gameOver = true;
-      }
-      // плохую пропустил — ничего, это хорошо
     }
   }
 }
 
+function wrapText(text, x, y, maxWidth, lineHeight) {
+  const words = text.split(' ');
+  let line = '';
+  for (let n = 0; n < words.length; n++) {
+    const testLine = line + words[n] + ' ';
+    const metrics = ctx.measureText(testLine);
+    if (metrics.width > maxWidth && n > 0) {
+      ctx.fillText(line.trim(), x, y);
+      line = words[n] + ' ';
+      y += lineHeight;
+    } else {
+      line = testLine;
+    }
+  }
+  ctx.fillText(line.trim(), x, y);
+  return y + lineHeight;
+}
+
 function draw() {
   ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#f5f5f8';
+  ctx.fillRect(0, 0, W, H);
 
-  // Игрок (лицо)
+  // ---- Заставка ----
+  if (state === 'splash') {
+    ctx.fillStyle = '#222';
+    ctx.textAlign = 'center';
+
+    ctx.font = 'bold 34px Arial';
+    ctx.fillText('Сашкины члены', W / 2, H / 2 - 30);
+
+    ctx.font = 'bold 24px Arial';
+    ctx.fillStyle = '#22a55a';
+    ctx.fillText('версия 1', W / 2, H / 2 + 20);
+
+    ctx.font = '16px Arial';
+    ctx.fillStyle = '#22a55a';
+    ctx.fillText('Коснись экрана, чтобы продолжить', W / 2, H - 60);
+    return;
+  }
+
+  // ---- Стартовый экран ----
+  if (state === 'start') {
+    ctx.fillStyle = '#222';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 26px Arial';
+    ctx.fillText('Игра', W / 2, 70);
+
+    ctx.font = '20px Arial';
+    ctx.fillStyle = '#333';
+    const text = 'Сашка, любит члены, помоги ему собрать их. Остерегайся членов негра';
+    wrapText(text, W / 2, 140, W - 60, 30);
+
+    if (playerImg.complete && playerImg.naturalWidth) {
+      ctx.drawImage(playerImg, player.x, player.y, player.w, player.h);
+    }
+
+    ctx.fillStyle = '#22a55a';
+    ctx.font = 'bold 20px Arial';
+    ctx.fillText('Коснись экрана, чтобы начать', W / 2, H - 60);
+    return;
+  }
+
+  // ---- Игрок ----
   if (playerImg.complete && playerImg.naturalWidth) {
     ctx.drawImage(playerImg, player.x, player.y, player.w, player.h);
   } else {
@@ -223,7 +279,7 @@ function draw() {
     ctx.fillRect(player.x, player.y, player.w, player.h);
   }
 
-  // Падающие предметы
+  // ---- Предметы ----
   for (const it of items) {
     ctx.save();
     ctx.translate(it.x + it.size / 2, it.y + it.size / 2);
@@ -237,19 +293,28 @@ function draw() {
     ctx.restore();
   }
 
-  // Экран Game Over
-  if (gameOver) {
-    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  // ---- Game Over ----
+  if (state === 'over') {
+    ctx.fillStyle = 'rgba(255,255,255,0.88)';
     ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = '#222';
     ctx.textAlign = 'center';
-    ctx.font = 'bold 42px Arial';
-    ctx.fillText('Игра окончена', W / 2, H / 2 - 40);
-    ctx.font = '24px Arial';
-    ctx.fillText('Очки: ' + score, W / 2, H / 2 + 10);
+
+    ctx.font = 'bold 28px Arial';
+    ctx.fillText('Игра окончена', W / 2, H / 2 - 90);
+
+    ctx.font = '20px Arial';
+    ctx.fillStyle = '#333';
+    const overText = 'Сашка, поймал слишком длинный хуй, начни заново';
+    wrapText(overText, W / 2, H / 2 - 30, W - 60, 30);
+
+    ctx.font = 'bold 22px Arial';
+    ctx.fillStyle = '#222';
+    ctx.fillText('Очки: ' + score, W / 2, H / 2 + 60);
+
     ctx.font = '18px Arial';
-    ctx.fillStyle = '#4ade80';
-    ctx.fillText('Нажми пробел или коснись экрана', W / 2, H / 2 + 60);
+    ctx.fillStyle = '#22a55a';
+    ctx.fillText('Коснись экрана, чтобы начать заново', W / 2, H / 2 + 120);
   }
 }
 
@@ -259,11 +324,11 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
-function restart() {
+function startGame() {
+  state = 'playing';
   items = [];
   score = 0;
-  lives = 3;
-  gameOver = false;
+  lives = START_LIVES;
   spawnTimer = 0;
   spawnInterval = 55;
   player.x = W / 2 - player.w / 2;
@@ -271,11 +336,7 @@ function restart() {
   document.getElementById('lives').textContent = lives;
 }
 
-// Перезапуск по касанию экрана после проигрыша
-canvas.addEventListener('touchstart', e => {
-  if (gameOver) { e.preventDefault(); restart(); }
-}, { passive: false });
-canvas.addEventListener('click', () => { if (gameOver) restart(); });
+function restart() { startGame(); }
 
 loop();
 </script>
