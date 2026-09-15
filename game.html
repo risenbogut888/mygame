@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Поймай картинку</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #1e1e2e;
+    font-family: Arial, sans-serif;
+    color: #fff;
+    overflow: hidden;
+    user-select: none;
+  }
+  #wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 10px;
+    padding: 10px;
+  }
+  #hud { font-size: 18px; }
+  #hud span { font-weight: bold; }
+  canvas {
+    background: #2a2a3e;
+    border-radius: 12px;
+    box-shadow: 0 0 30px rgba(0,0,0,0.5);
+    touch-action: none;
+    max-width: 100%;
+    max-height: 70vh;
+  }
+  #controls {
+    display: flex;
+    gap: 20px;
+  }
+  .btn {
+    width: 90px;
+    height: 70px;
+    border-radius: 16px;
+    border: none;
+    background: #4ade80;
+    color: #1e1e2e;
+    font-size: 36px;
+    font-weight: bold;
+    cursor: pointer;
+    box-shadow: 0 4px 0 #22a55a;
+    transition: transform 0.05s, box-shadow 0.05s;
+  }
+  .btn:active {
+    transform: translateY(4px);
+    box-shadow: 0 0 0 #22a55a;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="480" height="640"></canvas>
+  <div id="hud">
+    Очки: <span id="score">0</span> &nbsp;|&nbsp; Жизни: <span id="lives">3</span>
+  </div>
+  <div id="controls">
+    <button class="btn" id="btnLeft">◀</button>
+    <button class="btn" id="btnRight">▶</button>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  ЗДЕСЬ МЕНЯЕШЬ КАРТИНКИ (имена файлов рядом с game.html)
+// ============================================================
+const PLAYER_IMG_SRC = 'player.png'; // лицо платформы (150x150)
+const GOOD_IMG_SRC   = 'good.png';   // ловим -> +1 очко (80x80)
+const BAD_IMG_SRC    = 'bad.png';    // ловим -> -1 жизнь (80x80)
+// ============================================================
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width;
+const H = canvas.height;
+
+// Загрузка картинок
+function loadImg(src) {
+  const img = new Image();
+  img.src = src;
+  img.onerror = () => console.warn('Не нашёл картинку:', src);
+  return img;
+}
+const playerImg = loadImg(PLAYER_IMG_SRC);
+const goodImg   = loadImg(GOOD_IMG_SRC);
+const badImg    = loadImg(BAD_IMG_SRC);
+
+// Игрок — ровно 150x150, как картинка
+const PLAYER_SIZE = 150;
+const player = {
+  w: PLAYER_SIZE,
+  h: PLAYER_SIZE,
+  x: W / 2 - PLAYER_SIZE / 2,
+  y: H - PLAYER_SIZE - 20,
+  speed: 8
+};
+
+// Размер падающих — ровно 80x80, как картинки
+const ITEM_SIZE = 80;
+
+let items = [];
+let score = 0;
+let lives = 3;
+let gameOver = false;
+
+// Управление
+const keys = {};
+let moveLeft = false;
+let moveRight = false;
+
+document.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (gameOver && e.key === ' ') restart();
+});
+document.addEventListener('keyup', e => keys[e.key] = false);
+
+// Экранные кнопки — работают и мышью, и пальцем
+function bindHold(el, setter) {
+  const on  = e => { e.preventDefault(); setter(true);  };
+  const off = e => { e.preventDefault(); setter(false); };
+  el.addEventListener('mousedown', on);
+  el.addEventListener('mouseup', off);
+  el.addEventListener('mouseleave', off);
+  el.addEventListener('touchstart', on, { passive: false });
+  el.addEventListener('touchend', off);
+  el.addEventListener('touchcancel', off);
+}
+bindHold(document.getElementById('btnLeft'),  v => moveLeft = v);
+bindHold(document.getElementById('btnRight'), v => moveRight = v);
+
+// Спавн
+let spawnTimer = 0;
+let spawnInterval = 55;
+
+function spawnItem() {
+  // 25% — плохая картинка, 75% — хорошая
+  const isBad = Math.random() < 0.25;
+  items.push({
+    x: Math.random() * (W - ITEM_SIZE),
+    y: -ITEM_SIZE,
+    size: ITEM_SIZE,
+    speed: 2 + Math.random() * 2 + score * 0.03,
+    isBad: isBad,
+    img: isBad ? badImg : goodImg,
+    rot: (Math.random() - 0.5) * 0.6 // лёгкий наклон
+  });
+}
+
+function update() {
+  if (gameOver) return;
+
+  // Движение игрока
+  const left  = keys['ArrowLeft']  || keys['a'] || keys['A'] || moveLeft;
+  const right = keys['ArrowRight'] || keys['d'] || keys['D'] || moveRight;
+  if (left)  player.x -= player.speed;
+  if (right) player.x += player.speed;
+  player.x = Math.max(0, Math.min(W - player.w, player.x));
+
+  // Спавн
+  spawnTimer++;
+  if (spawnTimer >= spawnInterval) {
+    spawnTimer = 0;
+    spawnItem();
+    // постепенно ускоряем спавн
+    spawnInterval = Math.max(25, 55 - Math.floor(score / 3));
+  }
+
+  // Движение предметов
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    it.y += it.speed;
+
+    // Столкновение с игроком
+    if (
+      it.y + it.size >= player.y &&
+      it.y <= player.y + player.h &&
+      it.x + it.size >= player.x &&
+      it.x <= player.x + player.w
+    ) {
+      items.splice(i, 1);
+      if (it.isBad) {
+        lives--;
+        document.getElementById('lives').textContent = lives;
+        if (lives <= 0) gameOver = true;
+      } else {
+        score++;
+        document.getElementById('score').textContent = score;
+      }
+      continue;
+    }
+
+    // Промах
+    if (it.y > H) {
+      items.splice(i, 1);
+      if (!it.isBad) {
+        // пропустил хорошую — минус жизнь
+        lives--;
+        document.getElementById('lives').textContent = lives;
+        if (lives <= 0) gameOver = true;
+      }
+      // плохую пропустил — ничего, это хорошо
+    }
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Игрок (лицо)
+  if (playerImg.complete && playerImg.naturalWidth) {
+    ctx.drawImage(playerImg, player.x, player.y, player.w, player.h);
+  } else {
+    ctx.fillStyle = '#4ade80';
+    ctx.fillRect(player.x, player.y, player.w, player.h);
+  }
+
+  // Падающие предметы
+  for (const it of items) {
+    ctx.save();
+    ctx.translate(it.x + it.size / 2, it.y + it.size / 2);
+    ctx.rotate(it.rot);
+    if (it.img.complete && it.img.naturalWidth) {
+      ctx.drawImage(it.img, -it.size / 2, -it.size / 2, it.size, it.size);
+    } else {
+      ctx.fillStyle = it.isBad ? '#ef4444' : '#fbbf24';
+      ctx.fillRect(-it.size / 2, -it.size / 2, it.size, it.size);
+    }
+    ctx.restore();
+  }
+
+  // Экран Game Over
+  if (gameOver) {
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 42px Arial';
+    ctx.fillText('Игра окончена', W / 2, H / 2 - 40);
+    ctx.font = '24px Arial';
+    ctx.fillText('Очки: ' + score, W / 2, H / 2 + 10);
+    ctx.font = '18px Arial';
+    ctx.fillStyle = '#4ade80';
+    ctx.fillText('Нажми пробел или коснись экрана', W / 2, H / 2 + 60);
+  }
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function restart() {
+  items = [];
+  score = 0;
+  lives = 3;
+  gameOver = false;
+  spawnTimer = 0;
+  spawnInterval = 55;
+  player.x = W / 2 - player.w / 2;
+  document.getElementById('score').textContent = score;
+  document.getElementById('lives').textContent = lives;
+}
+
+// Перезапуск по касанию экрана после проигрыша
+canvas.addEventListener('touchstart', e => {
+  if (gameOver) { e.preventDefault(); restart(); }
+}, { passive: false });
+canvas.addEventListener('click', () => { if (gameOver) restart(); });
+
+loop();
+</script>
+</body>
+</html>
